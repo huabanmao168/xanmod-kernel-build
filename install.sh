@@ -110,7 +110,7 @@ net.ipv4.tcp_congestion_control = bbr
 net.core.default_qdisc = fq
 net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_slow_start_after_idle = 0
-net.ipv4.tcp_notsent_lowat = 16384
+net.ipv4.tcp_notsent_lowat = 131072
 net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_ecn = 2
@@ -161,6 +161,23 @@ EOF
 
 sysctl -p /etc/sysctl.d/99-xanmod.conf 2>/dev/null | grep -v "^#" || warn "部分参数需重启后生效"
 ok "sysctl 写入完成"
+
+# ── initcwnd / initrwnd ───────────────────────────────
+GW=$(ip route | awk '/^default/{print $3; exit}')
+if [ -n "$GW" ]; then
+  ip route change default via "$GW" initcwnd 64 initrwnd 64 2>/dev/null && ok "initcwnd/initrwnd = 64"
+  # 持久化（NetworkManager 或 /etc/rc.local）
+  RC=/etc/rc.local
+  grep -q 'initcwnd 64' "$RC" 2>/dev/null \
+    || echo "ip route change default via $GW initcwnd 64 initrwnd 64" >> "$RC"
+  chmod +x "$RC" 2>/dev/null || true
+fi
+
+# ── NIC 收发环缓冲 ────────────────────────────────────
+NIC=$(ip route | awk '/^default/{print $5; exit}')
+if [ -n "$NIC" ] && command -v ethtool &>/dev/null; then
+  ethtool -G "$NIC" rx 4096 tx 4096 2>/dev/null && ok "NIC ring buffer rx/tx = 4096 ($NIC)"
+fi
 
 # ══════════════════════════════════════════════════════
 echo ""
