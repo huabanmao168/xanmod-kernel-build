@@ -86,9 +86,9 @@ jobs:
         run: |
           cd kernel-src
 
-          # 使用 XanMod 自带 config（7.0.y 路径：CONFIGS/x86_64/config）
-          cp CONFIGS/x86_64/config .config
-          echo "✅ 使用 XanMod 自带 config: CONFIGS/x86_64/config"
+          # 用仓库里的精简 config（来自生产机 .221，已去掉无用驱动）
+          cp "${GITHUB_WORKSPACE}/config/machine.config" .config
+          echo "✅ 使用生产机精简 config"
 
           # 覆盖关键选项
           echo "=== 覆盖配置 ==="
