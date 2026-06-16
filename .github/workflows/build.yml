@@ -9,12 +9,8 @@ on:
       - '.github/workflows/build.yml'
   workflow_dispatch:
     inputs:
-      kernel_version:
-        description: '指定版本 (留空=自动用 config/kernel_version)'
-        required: false
-        default: ''
       use_latest:
-        description: '自动拉 xanmod 源最新版本'
+        description: '自动探测 xanmod 源最新版本'
         required: false
         default: 'false'
         type: choice
@@ -23,7 +19,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Checkout
@@ -36,96 +32,106 @@ jobs:
             build-essential bc bison flex libssl-dev libelf-dev \
             libncurses-dev dwarves pahole \
             dpkg-dev fakeroot rsync curl wget git \
-            llvm clang lld
+            llvm clang lld zstd
 
       - name: Resolve kernel version
-        id: version
         run: |
           if [ "${{ github.event.inputs.use_latest }}" = "true" ]; then
-            echo "=== 自动探测最新 xanmod 版本 ==="
+            echo "=== 自动探测最新 xanmod x64v3 版本 ==="
             LATEST=$(curl -s "https://deb.xanmod.org/dists/trixie/main/binary-amd64/Packages.gz" \
               | zcat \
-              | grep "^Package: linux-image-.*-x64v4-xanmod" \
-              | grep -oE "[0-9]+\.[0-9]+\.[0-9]+-x64v4-xanmod[0-9]+" \
+              | grep "^Package: linux-image-.*-x64v3-xanmod" \
+              | grep -oE "[0-9]+\.[0-9]+\.[0-9]+-x64v3-xanmod[0-9]+" \
               | sort -V | tail -1)
-            echo "最新版本: $LATEST"
-            echo "KERNEL_VER=$LATEST" >> $GITHUB_ENV
-          elif [ -n "${{ github.event.inputs.kernel_version }}" ]; then
-            echo "KERNEL_VER=${{ github.event.inputs.kernel_version }}" >> $GITHUB_ENV
+            echo "最新源码包版本: $LATEST"
+            SOURCE_PKG="$LATEST"
           else
-            echo "KERNEL_VER=$(cat config/kernel_version | tr -d '[:space:]')" >> $GITHUB_ENV
+            SOURCE_PKG=$(grep '^SOURCE_PKG=' config/kernel_version | cut -d= -f2)
           fi
 
-      - name: Parse version components
-        run: |
-          VER="${KERNEL_VER}"
-          BASE=$(echo "$VER" | cut -d- -f1)          # 7.0.12
-          ARCH=$(echo "$VER" | cut -d- -f2)           # x64v4
-          TAG=$(echo "$VER" | cut -d- -f3)            # xanmod1
-          MAJOR=$(echo "$BASE" | cut -d. -f1-2)       # 7.0
-          echo "BASE_VER=$BASE"      >> $GITHUB_ENV
-          echo "ARCH_VER=$ARCH"      >> $GITHUB_ENV
-          echo "XANMOD_TAG=$TAG"     >> $GITHUB_ENV
-          echo "MAJOR_VER=$MAJOR"    >> $GITHUB_ENV
-          echo "PKG_VER=${BASE}-${ARCH}-${TAG}" >> $GITHUB_ENV
+          TARGET_ARCH=$(grep '^TARGET_ARCH=' config/kernel_version | cut -d= -f2)
+
+          BASE=$(echo "$SOURCE_PKG" | cut -d- -f1)
+          TAG=$(echo "$SOURCE_PKG" | cut -d- -f3)
+          MAJOR=$(echo "$BASE" | cut -d. -f1-2)
+
+          echo "SOURCE_PKG=$SOURCE_PKG"   >> $GITHUB_ENV
+          echo "TARGET_ARCH=$TARGET_ARCH" >> $GITHUB_ENV
+          echo "BASE_VER=$BASE"           >> $GITHUB_ENV
+          echo "XANMOD_TAG=$TAG"          >> $GITHUB_ENV
+          echo "MAJOR_VER=$MAJOR"         >> $GITHUB_ENV
+          # 最终产物名用 target arch
+          echo "PKG_VER=${BASE}-${TARGET_ARCH}-${TAG}" >> $GITHUB_ENV
+
           echo ""
-          echo "=== 构建目标 ==="
+          echo "=== 构建计划 ==="
+          echo "源码包: $SOURCE_PKG"
+          echo "目标架构: $TARGET_ARCH"
           echo "内核版本: $BASE"
-          echo "指令集:   $ARCH"
-          echo "XanMod:  $TAG"
 
       - name: Download XanMod kernel source
         run: |
           DEB_URL="https://deb.xanmod.org/pool/main/l/linux-xanmod"
           ORIG="linux-xanmod_${BASE_VER}.orig.tar.xz"
-          DSC="linux-xanmod_${PKG_VER}.dsc"
-          DEBIAN="linux-xanmod_${PKG_VER}.debian.tar.xz"
+          # 源码包用 x64v3
+          SRC_PKG="${SOURCE_PKG}"
+          DSC="linux-xanmod_${SRC_PKG}.dsc"
+          DEBIAN="linux-xanmod_${SRC_PKG}.debian.tar.xz"
 
           echo "=== 下载内核源码 ==="
-          wget -q --show-progress "${DEB_URL}/${ORIG}"
-          wget -q --show-progress "${DEB_URL}/${DSC}"
-          wget -q --show-progress "${DEB_URL}/${DEBIAN}"
+          echo "orig:   ${DEB_URL}/${ORIG}"
+          echo "dsc:    ${DEB_URL}/${DSC}"
+          echo "debian: ${DEB_URL}/${DEBIAN}"
+
+          wget -q "${DEB_URL}/${ORIG}" || { echo "❌ orig 下载失败"; exit 1; }
+          wget -q "${DEB_URL}/${DSC}" || { echo "❌ dsc 下载失败"; exit 1; }
+          wget -q "${DEB_URL}/${DEBIAN}" || { echo "❌ debian 下载失败"; exit 1; }
 
           dpkg-source -x "${DSC}" kernel-src
+          echo "✅ 源码解压完成"
 
       - name: Apply custom patches
         run: |
           cd kernel-src
-          PATCH_DIR="${GITHUB_WORKSPACE}/patches"
           GITLAB_BASE="https://gitlab.com/xanmod/linux-patches/-/raw/master/linux-${MAJOR_VER}.y-xanmod"
 
           echo "=== 应用补丁 ==="
-          # 读 patch_list，跳过空行和注释
           grep -v '^\s*#' "${GITHUB_WORKSPACE}/config/patch_list" | grep -v '^\s*$' | while read patch; do
-            if [ -f "${PATCH_DIR}/${patch}" ]; then
+            if [ -f "${GITHUB_WORKSPACE}/patches/${patch}" ]; then
               echo "[本地] $patch"
-              patch -p1 < "${PATCH_DIR}/${patch}"
+              patch -p1 < "${GITHUB_WORKSPACE}/patches/${patch}"
             else
               echo "[远程] $patch"
               curl -fsSL "${GITLAB_BASE}/${patch}" | patch -p1
             fi
           done
-          echo "=== 补丁应用完成 ==="
+          echo "✅ 补丁应用完成"
 
       - name: Setup kernel config
         run: |
           cp config/kernel.config kernel-src/.config
           cd kernel-src
 
-          # 确保关键选项正确
-          # HZ=500
+          # 关键选项覆盖
+          scripts/config --disable CONFIG_HZ_100
           scripts/config --disable CONFIG_HZ_250
+          scripts/config --disable CONFIG_HZ_300
+          scripts/config --disable CONFIG_HZ_1000
           scripts/config --enable  CONFIG_HZ_500
           scripts/config --set-val CONFIG_HZ 500
 
-          # x64v4
+          # x64v4 AVX-512
           scripts/config --set-val CONFIG_X86_64_VERSION 4
 
-          # 默认 BBR
+          # BBR 默认
           scripts/config --enable  CONFIG_TCP_CONG_BBR
-          scripts/config --set-str CONFIG_DEFAULT_TCP_CONG bbr
+          scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
+
+          # TCP collapse sysctl（Cloudflare 补丁）
+          scripts/config --enable CONFIG_TCP_COLLAPSE_SYSCTL 2>/dev/null || true
 
           make olddefconfig LLVM=1
+
           echo "=== 关键配置确认 ==="
           grep -E "^CONFIG_HZ=|HZ_500|X86_64_VERSION|TCP_CONG_BBR|DEFAULT_TCP" .config
 
@@ -133,16 +139,17 @@ jobs:
         run: |
           cd kernel-src
           NPROC=$(nproc)
-          echo "=== 开始编译，$NPROC 核心 ==="
+          echo "=== 开始编译 (${NPROC} 核心) ==="
           make -j${NPROC} LLVM=1 bindeb-pkg \
-            LOCALVERSION="" \
-            2>&1 | tail -30
-          echo "=== 编译完成 ==="
+            LOCALVERSION="-${TARGET_ARCH}-${XANMOD_TAG}" \
+            2>&1 | tail -50
+          echo "✅ 编译完成"
 
       - name: Collect packages
         run: |
           mkdir -p dist
-          mv ../*.deb dist/ 2>/dev/null || true
+          # deb 在源码目录上一级
+          find .. -maxdepth 1 -name "*.deb" -exec mv {} dist/ \;
           echo "=== 产物 ==="
           ls -lh dist/
 
@@ -154,18 +161,24 @@ jobs:
           body: |
             ## XanMod ${{ env.PKG_VER }}
 
+            **源码基础**: ${{ env.SOURCE_PKG }}
+            **目标指令集**: ${{ env.TARGET_ARCH }} (AVX-512)
+
             ### 改动（相比官方预编译包）
             - 定时器频率: **500Hz**（官方 250Hz）
-            - 指令集: **x64v4 AVX-512**
+            - 指令集: **x64v4 AVX-512**（官方 x64v3）
             - 新增: Cloudflare TCP / fullcone NAT / FLOWOFFLOAD
 
             ### 安装
             ```bash
-            wget $(curl -s https://api.github.com/repos/huabanmao168/xanmod-kernel-build/releases/latest | grep "browser_download_url.*linux-image.*deb" | cut -d'"' -f4)
+            # 下载 linux-image deb
+            wget $(curl -s https://api.github.com/repos/huabanmao168/xanmod-kernel-build/releases/latest \
+              | grep "browser_download_url.*linux-image.*deb" | head -1 | cut -d'"' -f4)
             dpkg -i linux-image-*.deb
+            update-grub
             reboot
             # 验证
-            uname -r && sysctl net.ipv4.tcp_congestion_control && modinfo tcp_bbr | grep version
+            uname -r && sysctl net.ipv4.tcp_congestion_control
             ```
           files: dist/*.deb
           fail_on_unmatched_files: false
