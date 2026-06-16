@@ -101,6 +101,7 @@ net.ipv4.tcp_slow_start_after_idle = 0
 net.ipv4.tcp_notsent_lowat = 16384
 net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_ecn = 2
 net.ipv4.tcp_fin_timeout = 15
 net.ipv4.tcp_keepalive_time = 600
 net.ipv4.tcp_keepalive_intvl = 60
@@ -126,8 +127,8 @@ net.ipv4.udp_wmem_min = 16384
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 
-# ── IP 转发（按需开启，代理转发场景需要）─────────────
-# net.ipv4.ip_forward = 1
+# ── IP 转发（代理转发必须）────────────────────────────
+net.ipv4.ip_forward = 1
 EOF
 
 sysctl -p /etc/sysctl.d/99-xanmod.conf 2>/dev/null | grep -v "^#" || warn "部分参数需重启后生效"
