@@ -5,57 +5,20 @@
 
 set -e
 
-REPO="huabanmao168/xanmod-kernel-build"
-TMP_DIR=$(mktemp -d)
-cleanup() { rm -rf "$TMP_DIR"; }
-trap cleanup EXIT
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+RED='\\033[0;31m'; GREEN='\\033[0;32m'; YELLOW='\\033[1;33m'; NC='\\033[0m'
 ok()   { echo -e "${GREEN}✅ $*${NC}"; }
 warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
 die()  { echo -e "${RED}❌ $*${NC}"; exit 1; }
 
 echo "=================================================="
-echo "  XanMod 自定义内核安装 + 网络调优"
+echo "  XanMod 网络调优"
 echo "=================================================="
 echo ""
 
 # ══════════════════════════════════════════════════════
-# 1. 内核安装
+# 1. 系统限制
 # ══════════════════════════════════════════════════════
-echo "【1/3】内核安装"
-
-RELEASE_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest") \
-  || die "无法访问 GitHub API"
-
-TAG=$(echo "$RELEASE_JSON" | grep -oP '"tag_name":\s*"\K[^"]+')
-echo "  最新版本: $TAG"
-
-DEB_URL=$(echo "$RELEASE_JSON" \
-  | grep -oP '"browser_download_url":\s*"\K[^"]+linux-image[^"]+\.deb' \
-  | head -1)
-[ -z "$DEB_URL" ] && die "未找到 linux-image deb，Release 可能还在构建中"
-
-echo "  下载: $(basename "$DEB_URL")"
-wget -q --show-progress -O "$TMP_DIR/linux-image.deb" "$DEB_URL"
-
-# 顺带下 headers（WireGuard/驱动编译需要）
-HEADERS_URL=$(echo "$RELEASE_JSON" \
-  | grep -oP '"browser_download_url":\s*"\K[^"]+linux-headers[^"]+\.deb' \
-  | head -1)
-if [ -n "$HEADERS_URL" ]; then
-  wget -q --show-progress -O "$TMP_DIR/linux-headers.deb" "$HEADERS_URL"
-fi
-
-dpkg -i "$TMP_DIR"/linux-*.deb
-update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || warn "手动确认 grub"
-ok "内核 $TAG 安装完成"
-
-# ══════════════════════════════════════════════════════
-# 2. 系统限制
-# ══════════════════════════════════════════════════════
-echo ""
-echo "【2/3】系统限制"
+echo "【1/2】系统限制"
 
 cat > /etc/security/limits.d/99-xanmod.conf << 'EOF'
 * soft nofile 1048576
@@ -71,7 +34,7 @@ ok "文件描述符上限 1048576"
 # 3. sysctl（合并机器现有调优参数）
 # ══════════════════════════════════════════════════════
 echo ""
-echo "【3/3】sysctl 调优"
+echo "【2/2】sysctl 调优"
 
 # 加载 conntrack 模块（默认可能未加载，否则 sysctl 报错）
 modprobe nf_conntrack 2>/dev/null || true
