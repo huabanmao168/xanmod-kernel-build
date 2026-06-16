@@ -86,25 +86,9 @@ jobs:
         run: |
           cd kernel-src
 
-          # 使用 XanMod 自带的 x86-64-v3 config 作为基础（最兼容）
-          XANMOD_CONFIG="CONFIGS/xanmod/gcc/x86_64_v3"
-          if [ -f "$XANMOD_CONFIG" ]; then
-            cp "$XANMOD_CONFIG" .config
-            echo "✅ 使用 XanMod 自带 config: $XANMOD_CONFIG"
-          elif [ -f "CONFIGS/xanmod/gcc/x86_64_v3/.config" ]; then
-            cp "CONFIGS/xanmod/gcc/x86_64_v3/.config" .config
-            echo "✅ 使用 XanMod 自带 config (.config)"
-          else
-            echo "⚠️  未找到 XanMod config，尝试查找..."
-            find CONFIGS -name "*x86_64*" -o -name "*x64*" | head -10
-            # fallback: make xanmod_defconfig if available
-            if grep -q "xanmod" arch/x86/configs/* 2>/dev/null; then
-              make xanmod_x86_64_v3_defconfig
-            else
-              echo "❌ 无法找到合适的 defconfig"
-              exit 1
-            fi
-          fi
+          # 使用 XanMod 自带 config（7.0.y 路径：CONFIGS/x86_64/config）
+          cp CONFIGS/x86_64/config .config
+          echo "✅ 使用 XanMod 自带 config: CONFIGS/x86_64/config"
 
           # 覆盖关键选项
           echo "=== 覆盖配置 ==="
