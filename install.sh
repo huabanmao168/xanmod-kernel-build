@@ -126,6 +126,9 @@ net.ipv4.tcp_no_metrics_save = 1
 net.ipv4.tcp_syn_retries = 3
 net.ipv4.tcp_synack_retries = 3
 net.ipv4.ip_local_port_range = 1024 65535
+# soga 下游 listen 端口段保留，避免内核出口源端口复用导致 bind EADDRINUSE
+# EG/HB/KM 三套面板 × 16 国 = 11100-11216，宽预留到 11399；30003 = 单独节点
+net.ipv4.ip_local_reserved_ports = 11100-11399,30003
 
 # ── Cloudflare TCP collapse ───────────────────────────
 net.ipv4.tcp_collapse_max_bytes = 6291456
