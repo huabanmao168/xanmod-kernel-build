@@ -5,7 +5,7 @@
 
 set -e
 
-RED='\\033[0;31m'; GREEN='\\033[0;32m'; YELLOW='\\033[1;33m'; NC='\\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}✅ $*${NC}"; }
 warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
 die()  { echo -e "${RED}❌ $*${NC}"; exit 1; }
@@ -177,7 +177,6 @@ echo "=================================================="
 ok "全部完成！"
 echo ""
 echo "当前内核: $(uname -r)"
-echo "新内核:   $TAG（重启后生效）"
 echo ""
 echo "  重启:  reboot"
 echo "  验证:  uname -r && sysctl net.ipv4.tcp_congestion_control"
@@ -190,7 +189,7 @@ FAIL=0
 check() {
   local key=$1 expect=$2
   local val
-  val=$(sysctl -n "$key" 2>/dev/null)
+  val=$(sysctl -n "$key" 2>/dev/null) || true
   if [ -z "$val" ]; then
     echo "  ❌ $key = (空，内核不支持)"
     FAIL=$((FAIL+1))
