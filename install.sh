@@ -127,6 +127,12 @@ net.ipv4.neigh.default.gc_thresh3 = 16384
 EOF
 
 sysctl -p /etc/sysctl.d/99-xanmod.conf 2>/dev/null | grep -v "^#" || warn "部分参数需重启后生效"
+# conntrack 参数需模块加载后再显式写入
+sysctl -w net.netfilter.nf_conntrack_max=1048576 2>/dev/null || true
+sysctl -w net.netfilter.nf_conntrack_tcp_timeout_established=600 2>/dev/null || true
+sysctl -w net.netfilter.nf_conntrack_tcp_timeout_time_wait=30 2>/dev/null || true
+sysctl -w net.netfilter.nf_conntrack_udp_timeout=30 2>/dev/null || true
+sysctl -w net.netfilter.nf_conntrack_udp_timeout_stream=60 2>/dev/null || true
 ok "sysctl 写入完成"
 
 # ── initcwnd / initrwnd ───────────────────────────────
