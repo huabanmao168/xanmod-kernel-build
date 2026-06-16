@@ -123,6 +123,7 @@ net.ipv4.tcp_max_tw_buckets = 2000000
 net.ipv4.tcp_max_orphans = 524288
 net.ipv4.tcp_syncookies = 1
 net.ipv4.tcp_no_metrics_save = 1
+net.ipv4.tcp_autocorking = 0
 net.ipv4.tcp_syn_retries = 3
 net.ipv4.tcp_synack_retries = 3
 net.ipv4.ip_local_port_range = 1024 65535
@@ -181,6 +182,31 @@ NIC=$(ip route | awk '/^default/{print $5; exit}')
 if [ -n "$NIC" ] && command -v ethtool &>/dev/null; then
   ethtool -G "$NIC" rx 4096 tx 4096 2>/dev/null && ok "NIC ring buffer rx/tx = 4096 ($NIC)"
 fi
+
+# ── fq low_rate_threshold（小包优先）─────────────────
+if [ -n "$NIC" ]; then
+  tc qdisc replace dev "$NIC" root fq quantum 3028 low_rate_threshold 4Mbit 2>/dev/null \
+    && ok "fq low_rate_threshold = 4Mbit ($NIC)"
+  grep -q "low_rate_threshold 4Mbit" /etc/rc.local 2>/dev/null \
+    || echo "tc qdisc replace dev $NIC root fq quantum 3028 low_rate_threshold 4Mbit" >> /etc/rc.local
+fi
+
+# ── XPS 发包绑核（配合 RPS 减少跨核 cache miss）──────
+if [ -n "$NIC" ]; then
+  NQUEUES=$(ls /sys/class/net/$NIC/queues/ | grep -c '^tx-' 2>/dev/null || echo 1)
+  NCPUS=$(nproc)
+  for i in $(seq 0 $((NQUEUES - 1))); do
+    echo $(printf "%x" $((1 << (i % NCPUS)))) > /sys/class/net/$NIC/queues/tx-$i/xps_cpus 2>/dev/null
+  done
+  ok "XPS 绑核完成 ($NQUEUES 队列 / $NCPUS 核)"
+  # 持久化
+  grep -q "xps_cpus" /etc/rc.local 2>/dev/null || cat >> /etc/rc.local << RCEOF
+for i in \$(seq 0 $((NQUEUES - 1))); do
+  echo \$(printf "%x" \$((1 << (i % $NCPUS)))) > /sys/class/net/$NIC/queues/tx-\$i/xps_cpus 2>/dev/null
+done
+RCEOF
+fi
+chmod +x /etc/rc.local 2>/dev/null || true
 
 # ══════════════════════════════════════════════════════
 echo ""
