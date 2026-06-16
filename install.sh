@@ -118,6 +118,10 @@ net.ipv4.ip_local_port_range = 1024 65535
 # ── Cloudflare TCP collapse ───────────────────────────
 net.ipv4.tcp_collapse_max_bytes = 6291456
 
+# ── TCP 窗口 ──────────────────────────────────────────
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_timestamps = 1
+
 # ── UDP ───────────────────────────────────────────────
 net.ipv4.udp_mem = 786432 1048576 1572864
 net.ipv4.udp_rmem_min = 16384
@@ -129,6 +133,18 @@ net.ipv6.conf.default.disable_ipv6 = 1
 
 # ── IP 转发（代理转发必须）────────────────────────────
 net.ipv4.ip_forward = 1
+
+# ── 连接追踪（代理高并发必须，表满新连接直接报错）────
+net.netfilter.nf_conntrack_max = 1048576
+net.netfilter.nf_conntrack_tcp_timeout_established = 600
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
+net.netfilter.nf_conntrack_udp_timeout = 30
+net.netfilter.nf_conntrack_udp_timeout_stream = 60
+
+# ── ARP 缓存（大量不同 IP 访问时防溢出）──────────────
+net.ipv4.neigh.default.gc_thresh1 = 4096
+net.ipv4.neigh.default.gc_thresh2 = 8192
+net.ipv4.neigh.default.gc_thresh3 = 16384
 EOF
 
 sysctl -p /etc/sysctl.d/99-xanmod.conf 2>/dev/null | grep -v "^#" || warn "部分参数需重启后生效"
