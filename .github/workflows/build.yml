@@ -39,7 +39,8 @@ jobs:
             build-essential bc bison flex libssl-dev libelf-dev \
             libncurses-dev dwarves pahole \
             fakeroot rsync curl wget \
-            llvm clang lld zstd cpio kmod
+            llvm clang lld zstd cpio kmod \
+            debhelper libdw-dev
 
       - name: Resolve kernel version
         run: |
