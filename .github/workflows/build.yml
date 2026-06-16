@@ -140,13 +140,16 @@ jobs:
           NPROC=$(nproc)
           echo "=== 开始编译 ($NPROC 核心) ==="
 
-          # bindeb-pkg 生成 .deb
+          # pipefail 确保 make 失败能被捕获
+          set -o pipefail
           make -j$NPROC LLVM=1 bindeb-pkg \
             LOCALVERSION="-${TARGET_ARCH}-${XANMOD_TAG}" \
             KDEB_PKGVERSION="$(date +%Y%m%d)" \
-            2>&1 | tail -30
+            2>&1 | tee /tmp/build.log | tail -50
 
           echo "✅ 编译完成"
+          echo "=== deb 产物 ==="
+          ls -lh ../*.deb
 
       - name: Collect packages
         run: |
