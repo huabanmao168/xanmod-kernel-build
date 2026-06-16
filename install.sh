@@ -219,4 +219,41 @@ echo ""
 echo "  重启:  reboot"
 echo "  验证:  uname -r && sysctl net.ipv4.tcp_congestion_control"
 echo "  BBR版: modinfo tcp_bbr | grep version"
+echo ""
+
+# ── 验收快照 ─────────────────────────────────────────
+echo "【验收快照】"
+FAIL=0
+check() {
+  local key=$1 expect=$2
+  local val
+  val=$(sysctl -n "$key" 2>/dev/null)
+  if [ -z "$val" ]; then
+    echo "  ❌ $key = (空，内核不支持)"
+    FAIL=$((FAIL+1))
+  elif [ -n "$expect" ] && [ "$val" != "$expect" ]; then
+    echo "  ⚠️  $key = $val (期望 $expect)"
+  else
+    echo "  ✅ $key = $val"
+  fi
+}
+check net.ipv4.tcp_congestion_control bbr
+check net.ipv4.tcp_slow_start_after_idle 0
+check net.ipv4.tcp_autocorking 0
+check net.ipv4.tcp_no_metrics_save 1
+check net.ipv4.tcp_notsent_lowat 131072
+check net.core.netdev_max_backlog ""
+check net.core.netdev_budget ""
+check net.ipv4.ip_local_reserved_ports ""
+check net.netfilter.nf_conntrack_max ""
+echo ""
+NIC2=$(ip route | awk '/^default/{print $5; exit}')
+if [ -n "$NIC2" ]; then
+  CW=$(ip route show default | grep -oP 'initcwnd \K\d+' || echo "未设")
+  echo "  initcwnd = $CW"
+  tc qdisc show dev "$NIC2" | grep -q "low_rate_threshold 4Mbit" \
+    && echo "  ✅ fq low_rate_threshold = 4Mbit" \
+    || echo "  ⚠️  fq low_rate_threshold 未生效"
+fi
+[ "$FAIL" -gt 0 ] && echo "" && warn "有 $FAIL 条参数未写入，检查内核是否支持" || echo "  全部写入成功"
 echo "=================================================="
