@@ -1,0 +1,134 @@
+name: Build XanMod Kernel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'config/**'
+      - 'patches/**'
+      - '.github/workflows/build.yml'
+      - 'build.sh'
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: 'XanMod kernel version (e.g. 6.18.34-x64v4-xanmod1)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            libncurses-dev dwarves pahole \
+            dpkg-dev fakeroot rsync curl wget git \
+            llvm clang lld
+
+      - name: Read kernel version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.kernel_version }}" ]; then
+            echo "KERNEL_VER=${{ github.event.inputs.kernel_version }}" >> $GITHUB_ENV
+          else
+            echo "KERNEL_VER=$(cat config/kernel_version)" >> $GITHUB_ENV
+          fi
+
+      - name: Parse version components
+        run: |
+          # e.g. 6.18.34-x64v4-xanmod1
+          VER="${KERNEL_VER}"
+          BASE=$(echo "$VER" | cut -d- -f1)          # 6.18.34
+          ARCH=$(echo "$VER" | cut -d- -f2)           # x64v4
+          TAG=$(echo "$VER" | cut -d- -f3)            # xanmod1
+          MAJOR=$(echo "$BASE" | cut -d. -f1-2)       # 6.18
+          echo "BASE_VER=$BASE"      >> $GITHUB_ENV
+          echo "ARCH_VER=$ARCH"      >> $GITHUB_ENV
+          echo "XANMOD_TAG=$TAG"     >> $GITHUB_ENV
+          echo "MAJOR_VER=$MAJOR"    >> $GITHUB_ENV
+          echo "PKG_VER=${BASE}-${ARCH}-${TAG}" >> $GITHUB_ENV
+
+      - name: Download XanMod kernel source
+        run: |
+          # XanMod 用 deb.xanmod.org 的 dsc/orig 包
+          DEB_URL="https://deb.xanmod.org/pool/main/l/linux-xanmod"
+          ORIG="linux-xanmod_${BASE_VER}.orig.tar.xz"
+          DSC="linux-xanmod_${PKG_VER}.dsc"
+          DEBIAN="linux-xanmod_${PKG_VER}.debian.tar.xz"
+
+          wget -q "${DEB_URL}/${ORIG}"
+          wget -q "${DEB_URL}/${DSC}"
+          wget -q "${DEB_URL}/${DEBIAN}"
+
+          dpkg-source -x "${DSC}" kernel-src
+
+      - name: Apply custom patches
+        run: |
+          cd kernel-src
+          PATCH_DIR="${GITHUB_WORKSPACE}/patches"
+
+          echo "=== Applying patches ==="
+          for patch in $(cat "${GITHUB_WORKSPACE}/config/patch_list"); do
+            if [ -f "${PATCH_DIR}/${patch}" ]; then
+              echo "Applying: ${patch}"
+              patch -p1 < "${PATCH_DIR}/${patch}"
+            else
+              echo "Downloading: ${patch}"
+              # 从 xanmod gitlab 拉
+              GITLAB_BASE="https://gitlab.com/xanmod/linux-patches/-/raw/master/linux-${MAJOR_VER}.y-xanmod"
+              curl -fsSL "${GITLAB_BASE}/${patch}" | patch -p1
+            fi
+          done
+
+      - name: Copy kernel config
+        run: |
+          cp config/kernel.config kernel-src/.config
+          cd kernel-src
+          make olddefconfig LLVM=1
+
+      - name: Build kernel .deb packages
+        run: |
+          cd kernel-src
+          NPROC=$(nproc)
+          echo "Building with ${NPROC} cores..."
+          make -j${NPROC} LLVM=1 bindeb-pkg \
+            LOCALVERSION="-${ARCH_VER}-${XANMOD_TAG}" \
+            2>&1 | tail -50
+
+      - name: Collect .deb packages
+        run: |
+          mkdir -p dist
+          mv ../*.deb dist/ 2>/dev/null || true
+          ls -lh dist/
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "kernel-${{ env.PKG_VER }}"
+          name: "XanMod ${{ env.PKG_VER }}"
+          body: |
+            ## XanMod 自定义内核 ${{ env.PKG_VER }}
+
+            ### 包含补丁
+            $(cat config/patch_list | sed 's/^/- /')
+
+            ### 安装方法
+            ```bash
+            # 下载并安装
+            wget https://github.com/huabanmao168/xanmod-kernel-build/releases/download/kernel-${{ env.PKG_VER }}/linux-image-*.deb
+            dpkg -i linux-image-*.deb
+            reboot
+            # 重启后验证
+            uname -r
+            sysctl net.ipv4.tcp_congestion_control
+            ```
+          files: dist/*.deb
+          fail_on_unmatched_files: false
