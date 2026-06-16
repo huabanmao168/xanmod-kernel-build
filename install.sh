@@ -39,7 +39,15 @@ DEB_URL=$(echo "$RELEASE_JSON" \
 echo "  下载: $(basename "$DEB_URL")"
 wget -q --show-progress -O "$TMP_DIR/linux-image.deb" "$DEB_URL"
 
-dpkg -i "$TMP_DIR/linux-image.deb"
+# 顺带下 headers（WireGuard/驱动编译需要）
+HEADERS_URL=$(echo "$RELEASE_JSON" \
+  | grep -oP '"browser_download_url":\s*"\K[^"]+linux-headers[^"]+\.deb' \
+  | head -1)
+if [ -n "$HEADERS_URL" ]; then
+  wget -q --show-progress -O "$TMP_DIR/linux-headers.deb" "$HEADERS_URL"
+fi
+
+dpkg -i "$TMP_DIR"/linux-*.deb
 update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || warn "手动确认 grub"
 ok "内核 $TAG 安装完成"
 
@@ -65,6 +73,10 @@ ok "文件描述符上限 1048576"
 echo ""
 echo "【3/3】sysctl 调优"
 
+# 加载 conntrack 模块（默认可能未加载，否则 sysctl 报错）
+modprobe nf_conntrack 2>/dev/null || true
+echo "nf_conntrack" > /etc/modules-load.d/xanmod-conntrack.conf
+
 cat > /etc/sysctl.d/99-xanmod.conf << 'EOF'
 # ── 文件系统 ──────────────────────────────────────────
 fs.file-max = 10485760
@@ -89,8 +101,8 @@ net.core.wmem_max = 67108864
 net.core.optmem_max = 262144
 
 # ── TCP 缓冲区 ────────────────────────────────────────
-net.ipv4.tcp_rmem = 4096 262144 67108864
-net.ipv4.tcp_wmem = 4096 262144 67108864
+net.ipv4.tcp_rmem = 4096 262144 33554432
+net.ipv4.tcp_wmem = 4096 262144 33554432
 net.ipv4.tcp_mem = 2097152 3145728 6291456
 
 # ── TCP 性能 ──────────────────────────────────────────
