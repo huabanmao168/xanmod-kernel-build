@@ -121,6 +121,40 @@ jobs:
           scripts/config --enable CONFIG_NETFILTER_INGRESS
           # Cloudflare TCP collapse — 无 Kconfig 开关，编进即有，运行时 sysctl 启用
 
+          # === 裁剪服务器用不到的驱动（减少编译时间和体积）===
+          echo "=== 裁剪无用驱动 ==="
+          # 声卡
+          scripts/config --disable CONFIG_SOUND
+          scripts/config --disable CONFIG_SND
+          # 蓝牙
+          scripts/config --disable CONFIG_BT
+          # WiFi/无线
+          scripts/config --disable CONFIG_WIRELESS
+          scripts/config --disable CONFIG_CFG80211
+          scripts/config --disable CONFIG_MAC80211
+          scripts/config --disable CONFIG_WLAN
+          # 独显驱动（服务器无需）
+          scripts/config --disable CONFIG_DRM_NOUVEAU
+          scripts/config --disable CONFIG_DRM_I915
+          scripts/config --disable CONFIG_DRM_AMDGPU
+          scripts/config --disable CONFIG_DRM_RADEON
+          # 媒体/摄像头
+          scripts/config --disable CONFIG_MEDIA_SUPPORT
+          scripts/config --disable CONFIG_VIDEO_DEV
+          # 工业 I/O
+          scripts/config --disable CONFIG_IIO
+          # 业余无线电
+          scripts/config --disable CONFIG_HAMRADIO
+          # Firewire
+          scripts/config --disable CONFIG_FIREWIRE
+          # 红外
+          scripts/config --disable CONFIG_RC_CORE
+          # USB 打印机/扫描仪
+          scripts/config --disable CONFIG_USB_PRINTER
+          # 笔记本电源管理硬件（云服务器无需）
+          scripts/config --disable CONFIG_ACPI_BATTERY
+          scripts/config --disable CONFIG_BATTERY_CLASS_DEVICE
+
           # === 关闭 debug 减小体积加速编译 ===
           scripts/config --disable CONFIG_DEBUG_INFO_BTF
           scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
