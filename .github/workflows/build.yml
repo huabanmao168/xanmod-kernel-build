@@ -79,9 +79,9 @@ jobs:
 
       - name: Download XanMod kernel source
         run: |
-          echo "=== 从 GitHub 下载 xanmod/linux tag: ${GIT_TAG} ==="
-          echo "注意：XanMod GitHub 源码已内置所有补丁（BBR3/Cloudflare/fullcone 等）"
-          wget -q "https://github.com/xanmod/linux/archive/refs/tags/${GIT_TAG}.tar.gz" -O xanmod-src.tar.gz
+          echo "=== 从 GitLab 下载 xanmod/linux tag: ${GIT_TAG} ==="
+          echo "注意：XanMod 2024年底从 GitHub 搬到 GitLab，源码已内置所有补丁"
+          wget -q "https://gitlab.com/xanmod/linux/-/archive/${GIT_TAG}/linux-${GIT_TAG}.tar.gz" -O xanmod-src.tar.gz
           echo "✅ 下载完成 ($(du -h xanmod-src.tar.gz | cut -f1))"
           tar xf xanmod-src.tar.gz
           mv linux-${GIT_TAG} kernel-src
