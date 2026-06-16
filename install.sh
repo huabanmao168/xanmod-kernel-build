@@ -6,9 +6,9 @@
 set -e
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-ok()   { echo -e "${GREEN}✅ $*${NC}"; }
-warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
-die()  { echo -e "${RED}❌ $*${NC}"; exit 1; }
+ok()   { printf "${GREEN}✅ %s${NC}\n" "$*"; }
+warn() { printf "${YELLOW}⚠️  %s${NC}\n" "$*"; }
+die()  { printf "${RED}❌ %s${NC}\n" "$*"; exit 1; }
 
 echo "=================================================="
 echo "  XanMod 网络调优"
