@@ -5,12 +5,11 @@ on:
     branches: [main]
     paths:
       - 'config/**'
-      - 'patches/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
     inputs:
       use_latest:
-        description: '自动探测 xanmod 源最新版本'
+        description: '自动探测最新版本'
         required: false
         default: 'false'
         type: choice
@@ -25,10 +24,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free disk space
+      - name: Maximize disk space
         run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/share/boost
+          sudo rm -rf /usr/local/graalvm /usr/local/lib/heroku /usr/local/.ghcup
           sudo apt-get clean
+          echo "可用磁盘:"
           df -h /
 
       - name: Install build dependencies
@@ -37,66 +38,78 @@ jobs:
           sudo apt-get install -y -qq \
             build-essential bc bison flex libssl-dev libelf-dev \
             libncurses-dev dwarves pahole \
-            fakeroot rsync curl wget git \
-            llvm clang lld zstd cpio
+            fakeroot rsync curl wget \
+            llvm clang lld zstd cpio kmod
 
       - name: Resolve kernel version
         run: |
           if [ "${{ github.event.inputs.use_latest }}" = "true" ]; then
-            echo "=== 自动探测最新 xanmod 版本 ==="
+            echo "=== 自动探测最新版本 ==="
             LATEST=$(curl -s "https://deb.xanmod.org/dists/trixie/main/binary-amd64/Packages.gz" \
               | zcat \
               | grep "^Package: linux-image-.*-x64v3-xanmod" \
-              | grep -oE "[0-9]+\.[0-9]+\.[0-9]+-x64v3-xanmod[0-9]+" \
+              | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" \
               | sort -V | tail -1)
-            # 提取基础版本
-            BASE=$(echo "$LATEST" | cut -d- -f1)
-            TAG_SUFFIX=$(echo "$LATEST" | sed "s/${BASE}-x64v3-//")
+            BASE_VER="$LATEST"
           else
-            SOURCE_PKG=$(grep '^SOURCE_PKG=' config/kernel_version | cut -d= -f2)
-            BASE=$(echo "$SOURCE_PKG" | cut -d- -f1)
-            TAG_SUFFIX=$(echo "$SOURCE_PKG" | sed "s/${BASE}-x64v3-//")
+            BASE_VER=$(grep '^SOURCE_VER=' config/version | cut -d= -f2)
           fi
 
-          TARGET_ARCH=$(grep '^TARGET_ARCH=' config/kernel_version | cut -d= -f2)
-          MAJOR=$(echo "$BASE" | cut -d. -f1-2)
-          # XanMod GitHub tag 格式: 7.0.12-xanmod1
-          GIT_TAG="${BASE}-${TAG_SUFFIX}"
+          XANMOD_TAG=$(grep '^XANMOD_TAG=' config/version | cut -d= -f2)
+          TARGET_ARCH=$(grep '^TARGET_ARCH=' config/version | cut -d= -f2)
+          GIT_TAG="${BASE_VER}-${XANMOD_TAG}"
+          MAJOR_VER=$(echo "$BASE_VER" | cut -d. -f1-2)
 
-          echo "BASE_VER=$BASE"           >> $GITHUB_ENV
+          echo "BASE_VER=$BASE_VER"       >> $GITHUB_ENV
+          echo "XANMOD_TAG=$XANMOD_TAG"   >> $GITHUB_ENV
           echo "TARGET_ARCH=$TARGET_ARCH" >> $GITHUB_ENV
-          echo "XANMOD_TAG=$TAG_SUFFIX"   >> $GITHUB_ENV
-          echo "MAJOR_VER=$MAJOR"         >> $GITHUB_ENV
           echo "GIT_TAG=$GIT_TAG"         >> $GITHUB_ENV
-          echo "PKG_VER=${BASE}-${TARGET_ARCH}-${TAG_SUFFIX}" >> $GITHUB_ENV
+          echo "MAJOR_VER=$MAJOR_VER"     >> $GITHUB_ENV
 
           echo ""
-          echo "=== 构建计划 ==="
-          echo "GitHub tag: $GIT_TAG"
-          echo "目标架构: $TARGET_ARCH"
-          echo "内核版本: $BASE"
-          echo "产物版本: ${BASE}-${TARGET_ARCH}-${TAG_SUFFIX}"
+          echo "=============================="
+          echo " 内核: $BASE_VER"
+          echo " Tag:  $GIT_TAG"
+          echo " 架构: $TARGET_ARCH"
+          echo "=============================="
 
-      - name: Download XanMod kernel source
+      - name: Clone XanMod source (shallow)
         run: |
-          echo "=== 从 GitLab 下载 xanmod/linux tag: ${GIT_TAG} ==="
-          echo "注意：XanMod 2024年底从 GitHub 搬到 GitLab，源码已内置所有补丁"
-          wget -q "https://gitlab.com/xanmod/linux/-/archive/${GIT_TAG}/linux-${GIT_TAG}.tar.gz" -O xanmod-src.tar.gz
-          echo "✅ 下载完成 ($(du -h xanmod-src.tar.gz | cut -f1))"
-          tar xf xanmod-src.tar.gz
-          mv linux-${GIT_TAG} kernel-src
-          rm -f xanmod-src.tar.gz
-          echo "✅ 解压完成"
+          echo "=== 从 GitLab shallow clone tag: ${GIT_TAG} ==="
+          git clone --depth=1 --branch "${GIT_TAG}" \
+            "https://gitlab.com/xanmod/linux.git" kernel-src
+          echo "✅ clone 完成"
           ls kernel-src/Makefile
+          head -5 kernel-src/Makefile
 
-      - name: Setup kernel config
+      - name: Configure kernel
         run: |
           cd kernel-src
 
-          # 用仓库里的 config 作为基础
-          cp "${GITHUB_WORKSPACE}/config/kernel.config" .config
+          # 使用 XanMod 自带的 x86-64-v3 config 作为基础（最兼容）
+          XANMOD_CONFIG="CONFIGS/xanmod/gcc/x86_64_v3"
+          if [ -f "$XANMOD_CONFIG" ]; then
+            cp "$XANMOD_CONFIG" .config
+            echo "✅ 使用 XanMod 自带 config: $XANMOD_CONFIG"
+          elif [ -f "CONFIGS/xanmod/gcc/x86_64_v3/.config" ]; then
+            cp "CONFIGS/xanmod/gcc/x86_64_v3/.config" .config
+            echo "✅ 使用 XanMod 自带 config (.config)"
+          else
+            echo "⚠️  未找到 XanMod config，尝试查找..."
+            find CONFIGS -name "*x86_64*" -o -name "*x64*" | head -10
+            # fallback: make xanmod_defconfig if available
+            if grep -q "xanmod" arch/x86/configs/* 2>/dev/null; then
+              make xanmod_x86_64_v3_defconfig
+            else
+              echo "❌ 无法找到合适的 defconfig"
+              exit 1
+            fi
+          fi
 
-          # 关键选项覆盖
+          # 覆盖关键选项
+          echo "=== 覆盖配置 ==="
+
+          # HZ = 500
           scripts/config --disable CONFIG_HZ_100
           scripts/config --disable CONFIG_HZ_250
           scripts/config --disable CONFIG_HZ_300
@@ -104,76 +117,79 @@ jobs:
           scripts/config --enable  CONFIG_HZ_500
           scripts/config --set-val CONFIG_HZ 500
 
-          # x64v4 AVX-512
+          # x64v4 (AVX-512)
           scripts/config --set-val CONFIG_X86_64_VERSION 4
 
-          # BBR 默认
+          # BBR 默认拥塞控制
           scripts/config --enable  CONFIG_TCP_CONG_BBR
           scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
 
-          # Cloudflare TCP collapse sysctl
-          scripts/config --enable CONFIG_TCP_COLLAPSE_SYSCTL 2>/dev/null || true
+          # fq 默认 qdisc
+          scripts/config --set-str CONFIG_DEFAULT_NET_SCH "fq"
 
-          # fullcone NAT
-          scripts/config --enable CONFIG_NF_NAT_FULLCONE 2>/dev/null || true
-          scripts/config --enable CONFIG_NFT_FULLCONE 2>/dev/null || true
-
-          # FLOWOFFLOAD
-          scripts/config --module CONFIG_NETFILTER_XT_TARGET_FLOWOFFLOAD 2>/dev/null || true
+          # 关闭 debug 减小体积加速编译
+          scripts/config --disable CONFIG_DEBUG_INFO_BTF
+          scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
+          scripts/config --disable CONFIG_DEBUG_INFO_DWARF4
+          scripts/config --disable CONFIG_DEBUG_INFO
+          scripts/config --enable  CONFIG_DEBUG_INFO_NONE
 
           make olddefconfig LLVM=1
 
+          echo ""
           echo "=== 关键配置确认 ==="
-          grep -E "^CONFIG_HZ=|HZ_500|X86_64_VERSION|TCP_CONG_BBR|DEFAULT_TCP|FULLCONE|FLOWOFFLOAD|COLLAPSE" .config || true
+          grep -E "^CONFIG_HZ=|^CONFIG_HZ_500|X86_64_VERSION|TCP_CONG_BBR|DEFAULT_TCP_CONG|DEFAULT_NET_SCH|DEBUG_INFO_NONE" .config
 
-      - name: Build kernel .deb packages
+      - name: Build kernel
         run: |
           cd kernel-src
           NPROC=$(nproc)
-          echo "=== 开始编译 (${NPROC} 核心) ==="
-          make -j${NPROC} LLVM=1 bindeb-pkg \
+          echo "=== 开始编译 ($NPROC 核心) ==="
+
+          # bindeb-pkg 生成 .deb
+          make -j$NPROC LLVM=1 bindeb-pkg \
             LOCALVERSION="-${TARGET_ARCH}-${XANMOD_TAG}" \
-            2>&1 | tail -50
+            KDEB_PKGVERSION="$(date +%Y%m%d)" \
+            2>&1 | tail -30
+
           echo "✅ 编译完成"
 
       - name: Collect packages
+        id: collect
         run: |
           mkdir -p dist
-          find . -maxdepth 1 -name "*.deb" -exec mv {} dist/ \;
-          find .. -maxdepth 1 -name "*.deb" -exec mv {} dist/ \; 2>/dev/null || true
+          find / -maxdepth 3 -name "linux-image-*.deb" 2>/dev/null -exec cp {} dist/ \;
+          find / -maxdepth 3 -name "linux-headers-*.deb" 2>/dev/null -exec cp {} dist/ \;
+
           echo "=== 产物 ==="
           ls -lh dist/
+
+          if [ ! "$(ls dist/*.deb 2>/dev/null)" ]; then
+            echo "❌ 没有找到 .deb 产物"
+            exit 1
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "kernel-${{ env.PKG_VER }}"
-          name: "XanMod ${{ env.PKG_VER }}"
+          tag_name: "${{ env.GIT_TAG }}-${{ env.TARGET_ARCH }}"
+          name: "XanMod ${{ env.BASE_VER }} (${{ env.TARGET_ARCH }})"
           body: |
-            ## XanMod ${{ env.PKG_VER }}
+            ## XanMod ${{ env.BASE_VER }} — 自定义编译
 
-            **XanMod 源码 tag**: ${{ env.GIT_TAG }}
-            **目标指令集**: ${{ env.TARGET_ARCH }} (AVX-512)
-            **定时器**: 500Hz
-
-            ### 包含补丁（XanMod 源码已内置）
-            - BBR v3
-            - Cloudflare TCP collapse skip
-            - fullcone NAT
-            - xt_FLOWOFFLOAD
-            - ClearLinux 调度优化
-            - mm 工作集保护
-            - ZEN dm-crypt 直接加解密
-            - XanMod 核心优化
+            | 项目 | 值 |
+            |------|---|
+            | 内核版本 | ${{ env.BASE_VER }} |
+            | XanMod tag | ${{ env.GIT_TAG }} |
+            | 指令集 | ${{ env.TARGET_ARCH }} (AVX-512) |
+            | 定时器 | 500Hz |
+            | 默认拥塞控制 | BBR v3 |
+            | 默认 qdisc | fq |
 
             ### 安装
             ```bash
-            wget $(curl -s https://api.github.com/repos/huabanmao168/xanmod-kernel-build/releases/latest \
-              | grep "browser_download_url.*linux-image.*deb" | head -1 | cut -d'"' -f4)
-            dpkg -i linux-image-*.deb
-            update-grub && reboot
-            # 验证
-            uname -r && sysctl net.ipv4.tcp_congestion_control
+            curl -fsSL https://raw.githubusercontent.com/huabanmao168/xanmod-kernel-build/main/install.sh | bash
+            reboot
             ```
           files: dist/*.deb
           fail_on_unmatched_files: false

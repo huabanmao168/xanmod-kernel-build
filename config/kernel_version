@@ -1,5 +1,0 @@
-# 基于哪个源码包编译（xanmod 只发布 x64v2/x64v3）
-# 下载 x64v3 源码，编译时 config 改成 x64v4
-SOURCE_PKG=7.0.12-x64v3-xanmod1
-# 实际编译目标
-TARGET_ARCH=x64v4
