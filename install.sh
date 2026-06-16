@@ -36,6 +36,14 @@ echo "[3/4] 安装内核..."
 dpkg -i "$TMP_DIR/linux-image.deb"
 update-grub 2>/dev/null || true
 
+# 配置 Cloudflare TCP collapse sysctl（重启后生效）
+if ! grep -q "tcp_collapse_max_bytes" /etc/sysctl.conf 2>/dev/null; then
+    echo "" >> /etc/sysctl.conf
+    echo "# Cloudflare TCP: 高负载时跳过 collapse (0=禁用, 推荐 6291456=6MB)" >> /etc/sysctl.conf
+    echo "net.ipv4.tcp_collapse_max_bytes = 6291456" >> /etc/sysctl.conf
+    echo "      ✅ 已写入 tcp_collapse_max_bytes sysctl"
+fi
+
 echo "[4/4] 完成"
 echo ""
 echo "=== 安装成功 ==="

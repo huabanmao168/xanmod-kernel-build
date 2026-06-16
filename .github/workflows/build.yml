@@ -127,7 +127,17 @@ jobs:
           # fq 默认 qdisc
           scripts/config --set-str CONFIG_DEFAULT_NET_SCH "fq"
 
-          # 关闭 debug 减小体积加速编译
+          # === 网络补丁选项（XanMod 源码有代码但 config 可能没开） ===
+          # fullcone NAT
+          scripts/config --module CONFIG_NFT_FULLCONE
+          # FLOWOFFLOAD
+          scripts/config --module CONFIG_NETFILTER_XT_TARGET_FLOWOFFLOAD
+          # NF_FLOW_TABLE (FLOWOFFLOAD 的依赖)
+          scripts/config --module CONFIG_NF_FLOW_TABLE
+          scripts/config --enable CONFIG_NETFILTER_INGRESS
+          # Cloudflare TCP collapse — 无 Kconfig 开关，编进即有，运行时 sysctl 启用
+
+          # === 关闭 debug 减小体积加速编译 ===
           scripts/config --disable CONFIG_DEBUG_INFO_BTF
           scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
           scripts/config --disable CONFIG_DEBUG_INFO_DWARF4
@@ -138,7 +148,7 @@ jobs:
 
           echo ""
           echo "=== 关键配置确认 ==="
-          grep -E "^CONFIG_HZ=|^CONFIG_HZ_500|X86_64_VERSION|TCP_CONG_BBR|DEFAULT_TCP_CONG|DEFAULT_NET_SCH|DEBUG_INFO_NONE" .config
+          grep -E "^CONFIG_HZ=|HZ_500|X86_64_VERSION|TCP_CONG_BBR|DEFAULT_TCP_CONG|DEFAULT_NET_SCH|DEBUG_INFO_NONE|NFT_FULLCONE|XT_TARGET_FLOWOFFLOAD|NF_FLOW_TABLE" .config
 
       - name: Build kernel
         run: |
