@@ -1,10 +1,10 @@
 # XanMod 自定义内核补丁列表
-# 格式：相对路径（从 linux-6.18.y-xanmod/ 开始）
+# 格式：相对路径（从 linux-7.0.y-xanmod/ 开始）
 # 本地补丁放 patches/ 目录，没有的从 xanmod gitlab 自动拉取
 
 # === 网络优化（全选）===
-net/tcp/bbr3/0001-tcp_bbr-v3-update-TCP-bbr-congestion-control-module-.patch
-net/tcp/cloudflare/0001-tcp-Add-a-sysctl-to-skip-tcp-collapse-processing-whe.patch
+net/tcp/0001-tcp_bbr-v3-update-TCP-bbr-congestion-control-module-.patch
+net/tcp/0001-tcp-Add-a-sysctl-to-skip-tcp-collapse-processing-whe.patch
 net/netfilter/0001-netfilter-Add-netfilter-nf_tables-fullcone-support.patch
 net/netfilter/0001-netfilter-add-xt_FLOWOFFLOAD-target.patch
 
@@ -18,9 +18,9 @@ xanmod/0001-XANMOD-x86-build-Add-more-CFLAGS-optimizations.patch
 xanmod/0002-XANMOD-x86-build-Add-LLVM-polyhedral-loop-optimizer-.patch
 xanmod/0003-XANMOD-kbuild-Add-SMS-based-software-pipelining-flag.patch
 xanmod/0006-XANMOD-fair-Set-scheduler-tunable-latencies-to-unsca.patch
-xanmod/0012-XANMOD-kconfig-add-500Hz-timer-interrupt-kernel-conf.patch
-xanmod/0013-XANMOD-vfs-Decrease-rate-at-which-vfs-caches-are-rec.patch
-xanmod/0015-XANMOD-mm-vmscan-Reduce-amount-of-swapping.patch
+xanmod/0011-XANMOD-kconfig-add-500Hz-timer-interrupt-kernel-conf.patch
+xanmod/0012-XANMOD-vfs-Decrease-rate-at-which-vfs-caches-are-rec.patch
+xanmod/0014-XANMOD-mm-vmscan-Reduce-amount-of-swapping.patch
 
 # === 加密/安全 ===
 zen/0002-ZEN-dm-crypt-Disable-workqueues-for-crypto-ops.patch
