@@ -84,6 +84,14 @@ jobs:
           ls kernel-src/Makefile
           head -5 kernel-src/Makefile
 
+      - name: Patch fq defaults
+        run: |
+          cd kernel-src
+          # fq 默认 low_rate_threshold: 550Kbit → 4Mbit
+          sed -i 's/low_rate_threshold\t= 550000 \/ 8/low_rate_threshold\t= 4000000 \/ 8/' net/sched/sch_fq.c
+          grep "low_rate_threshold" net/sched/sch_fq.c | head -3
+          echo "✅ fq low_rate_threshold 默认值改为 4Mbit"
+
       - name: Configure kernel
         run: |
           cd kernel-src
