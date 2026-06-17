@@ -183,7 +183,8 @@ fi
 
 # ── NIC ring buffer ───────────────────────────────────
 if [ -n "$NIC" ] && command -v ethtool &>/dev/null; then
-  ethtool -G "$NIC" rx 4096 tx 4096 2>/dev/null && ok "NIC ring buffer rx/tx = 4096"
+  # virtio-net 硬限: rx max=1024, tx max=256
+  ethtool -G "$NIC" rx 1024 tx 256 2>/dev/null && ok "NIC ring buffer rx=1024 tx=256 (virtio max)"
 fi
 
 # ── fq：小包优先 ──────────────────────────────────────
