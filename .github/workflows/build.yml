@@ -18,7 +18,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
@@ -28,6 +28,7 @@ jobs:
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/share/boost
           sudo rm -rf /usr/local/graalvm /usr/local/lib/heroku /usr/local/.ghcup
+          sudo rm -rf /usr/share/swift /usr/local/julia* /opt/hostedtoolcache
           sudo apt-get clean
           echo "可用磁盘:"
           df -h /
@@ -87,93 +88,318 @@ jobs:
         run: |
           cd kernel-src
 
-          # 使用 XanMod 自带 config（与 7.0 源码配套）
+          # 使用 XanMod 自带 config 作为基础
           cp CONFIGS/x86_64/config .config
-          echo "✅ 使用 XanMod 自带 config"
+          echo "✅ 使用 XanMod 自带 config 作为基础"
 
-          # 覆盖关键选项
-          echo "=== 覆盖配置 ==="
-
-          # HZ = 500
+          # ============================================================
+          # 定时器 & 架构
+          # ============================================================
           scripts/config --disable CONFIG_HZ_100
           scripts/config --disable CONFIG_HZ_250
           scripts/config --disable CONFIG_HZ_300
           scripts/config --disable CONFIG_HZ_1000
           scripts/config --enable  CONFIG_HZ_500
           scripts/config --set-val CONFIG_HZ 500
-
-          # x64v4 (AVX-512)
           scripts/config --set-val CONFIG_X86_64_VERSION 4
 
-          # BBR 默认拥塞控制
+          # ============================================================
+          # 网络：BBR + fq + fullcone + flowoffload
+          # ============================================================
           scripts/config --enable  CONFIG_TCP_CONG_BBR
           scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
-
-          # fq 默认 qdisc
           scripts/config --set-str CONFIG_DEFAULT_NET_SCH "fq"
-
-          # === 网络补丁选项（XanMod 源码有代码但 config 可能没开） ===
-          # fullcone NAT
           scripts/config --module CONFIG_NFT_FULLCONE
-          # FLOWOFFLOAD
           scripts/config --module CONFIG_NETFILTER_XT_TARGET_FLOWOFFLOAD
-          # NF_FLOW_TABLE (FLOWOFFLOAD 的依赖)
           scripts/config --module CONFIG_NF_FLOW_TABLE
           scripts/config --enable CONFIG_NETFILTER_INGRESS
-          # Cloudflare TCP collapse — 无 Kconfig 开关，编进即有，运行时 sysctl 启用
 
-          # === 裁剪服务器用不到的驱动（减少编译时间和体积）===
-          echo "=== 裁剪无用驱动 ==="
-          # 声卡
+          # ============================================================
+          # 【激进裁剪】关闭服务器无用的整个子系统
+          # 顶层开关关闭后 make olddefconfig 自动级联取消所有子选项
+          # ============================================================
+
+          echo "=== 裁剪：声音子系统 (约760个选项) ==="
           scripts/config --disable CONFIG_SOUND
           scripts/config --disable CONFIG_SND
-          # 蓝牙
+
+          echo "=== 裁剪：GPU/显卡 (约170个选项) ==="
+          scripts/config --disable CONFIG_DRM
+          scripts/config --disable CONFIG_FB
+          scripts/config --disable CONFIG_VGA_ARB
+          scripts/config --disable CONFIG_BACKLIGHT_CLASS_DEVICE
+
+          echo "=== 裁剪：蓝牙 + WiFi + 无线 (约150个选项) ==="
           scripts/config --disable CONFIG_BT
-          # WiFi/无线
           scripts/config --disable CONFIG_WIRELESS
           scripts/config --disable CONFIG_CFG80211
           scripts/config --disable CONFIG_MAC80211
           scripts/config --disable CONFIG_WLAN
-          # 独显驱动（服务器无需）
-          scripts/config --disable CONFIG_DRM_NOUVEAU
-          scripts/config --disable CONFIG_DRM_I915
-          scripts/config --disable CONFIG_DRM_AMDGPU
-          scripts/config --disable CONFIG_DRM_RADEON
-          # 媒体/摄像头
-          scripts/config --disable CONFIG_MEDIA_SUPPORT
-          scripts/config --disable CONFIG_VIDEO_DEV
-          # 工业 I/O
-          scripts/config --disable CONFIG_IIO
-          # 业余无线电
-          scripts/config --disable CONFIG_HAMRADIO
-          # Firewire
-          scripts/config --disable CONFIG_FIREWIRE
-          # 红外
-          scripts/config --disable CONFIG_RC_CORE
-          # USB 打印机/扫描仪
-          scripts/config --disable CONFIG_USB_PRINTER
-          # 笔记本电源管理硬件（云服务器无需）
-          scripts/config --disable CONFIG_ACPI_BATTERY
-          scripts/config --disable CONFIG_BATTERY_CLASS_DEVICE
+          scripts/config --disable CONFIG_NFC
+          scripts/config --disable CONFIG_IEEE802154
 
-          # === 关闭 debug 减小体积加速编译 ===
+          echo "=== 裁剪：媒体/摄像头/DVB (约520个选项) ==="
+          scripts/config --disable CONFIG_MEDIA_SUPPORT
+
+          echo "=== 裁剪：工业 I/O 传感器 (约75个选项) ==="
+          scripts/config --disable CONFIG_IIO
+
+          echo "=== 裁剪：USB gadget/serial/网卡 (约200个选项) ==="
+          scripts/config --disable CONFIG_USB_SERIAL
+          scripts/config --disable CONFIG_USB_GADGET
+          scripts/config --disable CONFIG_USB_NET_DRIVERS
+
+          echo "=== 裁剪：输入设备/触摸屏/游戏手柄 (约175个选项) ==="
+          scripts/config --disable CONFIG_INPUT_TOUCHSCREEN
+          scripts/config --disable CONFIG_INPUT_JOYSTICK
+          scripts/config --disable CONFIG_INPUT_MISC
+          scripts/config --disable CONFIG_INPUT_TABLET
+
+          echo "=== 裁剪：所有物理网卡驱动 (约150个选项) ==="
+          # 只保留 virtio-net，关闭所有物理 NIC vendor 驱动
+          scripts/config --disable CONFIG_NET_VENDOR_3COM
+          scripts/config --disable CONFIG_NET_VENDOR_ADAPTEC
+          scripts/config --disable CONFIG_NET_VENDOR_AGERE
+          scripts/config --disable CONFIG_NET_VENDOR_ALACRITECH
+          scripts/config --disable CONFIG_NET_VENDOR_ALTEON
+          scripts/config --disable CONFIG_NET_VENDOR_AMAZON
+          scripts/config --disable CONFIG_NET_VENDOR_AMD
+          scripts/config --disable CONFIG_NET_VENDOR_AQUANTIA
+          scripts/config --disable CONFIG_NET_VENDOR_ARC
+          scripts/config --disable CONFIG_NET_VENDOR_ATHEROS
+          scripts/config --disable CONFIG_NET_VENDOR_BROADCOM
+          scripts/config --disable CONFIG_NET_VENDOR_CADENCE
+          scripts/config --disable CONFIG_NET_VENDOR_CAVIUM
+          scripts/config --disable CONFIG_NET_VENDOR_CHELSIO
+          scripts/config --disable CONFIG_NET_VENDOR_CISCO
+          scripts/config --disable CONFIG_NET_VENDOR_CORTINA
+          scripts/config --disable CONFIG_NET_VENDOR_DEC
+          scripts/config --disable CONFIG_NET_VENDOR_DLINK
+          scripts/config --disable CONFIG_NET_VENDOR_EMULEX
+          scripts/config --disable CONFIG_NET_VENDOR_ENGLEDER
+          scripts/config --disable CONFIG_NET_VENDOR_FUNGIBLE
+          scripts/config --disable CONFIG_NET_VENDOR_GOOGLE
+          scripts/config --disable CONFIG_NET_VENDOR_HUAWEI
+          scripts/config --disable CONFIG_NET_VENDOR_INTEL
+          scripts/config --disable CONFIG_NET_VENDOR_LITEX
+          scripts/config --disable CONFIG_NET_VENDOR_MARVELL
+          scripts/config --disable CONFIG_NET_VENDOR_MELLANOX
+          scripts/config --disable CONFIG_NET_VENDOR_MICREL
+          scripts/config --disable CONFIG_NET_VENDOR_MICROCHIP
+          scripts/config --disable CONFIG_NET_VENDOR_MICROSEMI
+          scripts/config --disable CONFIG_NET_VENDOR_MICROSOFT
+          scripts/config --disable CONFIG_NET_VENDOR_MYRI
+          scripts/config --disable CONFIG_NET_VENDOR_NATSEMI
+          scripts/config --disable CONFIG_NET_VENDOR_NETERION
+          scripts/config --disable CONFIG_NET_VENDOR_NETRONOME
+          scripts/config --disable CONFIG_NET_VENDOR_NVIDIA
+          scripts/config --disable CONFIG_NET_VENDOR_OKI
+          scripts/config --disable CONFIG_NET_VENDOR_PACKET_ENGINES
+          scripts/config --disable CONFIG_NET_VENDOR_PENSANDO
+          scripts/config --disable CONFIG_NET_VENDOR_QLOGIC
+          scripts/config --disable CONFIG_NET_VENDOR_QUALCOMM
+          scripts/config --disable CONFIG_NET_VENDOR_RDC
+          scripts/config --disable CONFIG_NET_VENDOR_REALTEK
+          scripts/config --disable CONFIG_NET_VENDOR_RENESAS
+          scripts/config --disable CONFIG_NET_VENDOR_ROCKER
+          scripts/config --disable CONFIG_NET_VENDOR_SAMSUNG
+          scripts/config --disable CONFIG_NET_VENDOR_SEEQ
+          scripts/config --disable CONFIG_NET_VENDOR_SILAN
+          scripts/config --disable CONFIG_NET_VENDOR_SIS
+          scripts/config --disable CONFIG_NET_VENDOR_SMSC
+          scripts/config --disable CONFIG_NET_VENDOR_SOCIONEXT
+          scripts/config --disable CONFIG_NET_VENDOR_SOLARFLARE
+          scripts/config --disable CONFIG_NET_VENDOR_STMICRO
+          scripts/config --disable CONFIG_NET_VENDOR_SUN
+          scripts/config --disable CONFIG_NET_VENDOR_SYNOPSYS
+          scripts/config --disable CONFIG_NET_VENDOR_TEHUTI
+          scripts/config --disable CONFIG_NET_VENDOR_TI
+          scripts/config --disable CONFIG_NET_VENDOR_VERTEXCOM
+          scripts/config --disable CONFIG_NET_VENDOR_VIA
+          scripts/config --disable CONFIG_NET_VENDOR_WANGXUN
+          scripts/config --disable CONFIG_NET_VENDOR_WIZNET
+          scripts/config --disable CONFIG_NET_VENDOR_XILINX
+
+          echo "=== 裁剪：不常用文件系统 (约160个选项) ==="
+          scripts/config --disable CONFIG_BTRFS_FS
+          scripts/config --disable CONFIG_XFS_FS
+          scripts/config --disable CONFIG_JFS_FS
+          scripts/config --disable CONFIG_REISERFS_FS
+          scripts/config --disable CONFIG_OCFS2_FS
+          scripts/config --disable CONFIG_GFS2_FS
+          scripts/config --disable CONFIG_F2FS_FS
+          scripts/config --disable CONFIG_EROFS_FS
+          scripts/config --disable CONFIG_NTFS_FS
+          scripts/config --disable CONFIG_NTFS3_FS
+          scripts/config --disable CONFIG_FAT_FS
+          scripts/config --disable CONFIG_VFAT_FS
+          scripts/config --disable CONFIG_MSDOS_FS
+          scripts/config --disable CONFIG_HFS_FS
+          scripts/config --disable CONFIG_HFSPLUS_FS
+          scripts/config --disable CONFIG_UDF_FS
+          scripts/config --disable CONFIG_SQUASHFS
+          scripts/config --disable CONFIG_CEPH_FS
+          scripts/config --disable CONFIG_NFS_FS
+          scripts/config --disable CONFIG_NFSD
+          scripts/config --disable CONFIG_CIFS
+          scripts/config --disable CONFIG_9P_FS
+          scripts/config --disable CONFIG_AFS_FS
+          scripts/config --disable CONFIG_ORANGEFS_FS
+
+          echo "=== 裁剪：InfiniBand/RDMA (约40个选项) ==="
+          scripts/config --disable CONFIG_INFINIBAND
+          scripts/config --disable CONFIG_RDMA_CM
+
+          echo "=== 裁剪：业余无线电/CAN/ISDN/ATM (约80个选项) ==="
+          scripts/config --disable CONFIG_HAMRADIO
+          scripts/config --disable CONFIG_CAN
+          scripts/config --disable CONFIG_ISDN
+          scripts/config --disable CONFIG_ATM
+
+          echo "=== 裁剪：Firewire/并口 (约30个选项) ==="
+          scripts/config --disable CONFIG_FIREWIRE
+          scripts/config --disable CONFIG_PARPORT
+
+          echo "=== 裁剪：RTC 硬件驱动 (约94个选项) ==="
+          # 保留 CONFIG_RTC_CLASS 但关闭所有物理芯片驱动
+          scripts/config --disable CONFIG_RTC_DRV_CMOS
+          scripts/config --disable CONFIG_RTC_DRV_DS1307
+          scripts/config --disable CONFIG_RTC_DRV_PCF8523
+          scripts/config --disable CONFIG_RTC_DRV_ABB5ZES3
+          # 用 LOCALVERSION 系统时间即可
+
+          echo "=== 裁剪：硬件监控 HWMON (约310个选项) ==="
+          scripts/config --disable CONFIG_HWMON
+
+          echo "=== 裁剪：GPIO/PINCTRL/SPI (约180个选项) ==="
+          scripts/config --disable CONFIG_GPIOLIB
+          scripts/config --disable CONFIG_PINCTRL
+          scripts/config --disable CONFIG_SPI
+
+          echo "=== 裁剪：MFD/电源管理/稳压器 (约320个选项) ==="
+          scripts/config --disable CONFIG_MFD_CORE
+          scripts/config --disable CONFIG_REGULATOR
+          scripts/config --disable CONFIG_POWER_SUPPLY
+
+          echo "=== 裁剪：LEDS (约90个选项) ==="
+          scripts/config --disable CONFIG_NEW_LEDS
+
+          echo "=== 裁剪：Watchdog (约10个选项) ==="
+          scripts/config --disable CONFIG_WATCHDOG
+
+          echo "=== 裁剪：TPM (约20个选项) ==="
+          scripts/config --disable CONFIG_TCG_TPM
+
+          echo "=== 裁剪：NET_DSA 交换机芯片 (约70个选项) ==="
+          scripts/config --disable CONFIG_NET_DSA
+
+          echo "=== 裁剪：虚拟化宿主 (约25个选项) ==="
+          # 这些机器是 guest，不需要当 KVM host
+          scripts/config --disable CONFIG_KVM
+          scripts/config --disable CONFIG_VHOST_NET
+          scripts/config --disable CONFIG_VFIO
+
+          echo "=== 裁剪：NVMe (约27个选项) ==="
+          scripts/config --disable CONFIG_NVME_CORE
+
+          echo "=== 裁剪：物理 SCSI 控制器 ==="
+          scripts/config --disable CONFIG_SCSI_AIC7XXX
+          scripts/config --disable CONFIG_SCSI_AIC79XX
+          scripts/config --disable CONFIG_SCSI_MEGARAID_SAS
+          scripts/config --disable CONFIG_SCSI_MPT3SAS
+          scripts/config --disable CONFIG_SCSI_QLA_FC
+          scripts/config --disable CONFIG_SCSI_LPFC
+
+          echo "=== 裁剪：PCMCIA (约16个选项) ==="
+          scripts/config --disable CONFIG_PCMCIA
+          scripts/config --disable CONFIG_PCCARD
+
+          echo "=== 裁剪：MTD/Flash (约28个选项) ==="
+          scripts/config --disable CONFIG_MTD
+
+          echo "=== 裁剪：W1 1-Wire (约26个选项) ==="
+          scripts/config --disable CONFIG_W1
+
+          echo "=== 裁剪：IP_VS (IPVS 负载均衡，约25个选项) ==="
+          scripts/config --disable CONFIG_IP_VS
+
+          echo "=== 裁剪：加密硬件加速器 (约30个选项) ==="
+          scripts/config --disable CONFIG_CRYPTO_DEV_CCP
+          scripts/config --disable CONFIG_CRYPTO_DEV_QAT
+          scripts/config --disable CONFIG_CRYPTO_DEV_NITROX
+
+          echo "=== 裁剪：平台特定驱动 (Chrome/Dell/HP) ==="
+          scripts/config --disable CONFIG_CHROME_PLATFORMS
+          scripts/config --disable CONFIG_X86_PLATFORM_DEVICES
+          scripts/config --disable CONFIG_MXM_WMI
+
+          echo "=== 裁剪：CDROM/Floppy ==="
+          scripts/config --disable CONFIG_CDROM
+          scripts/config --disable CONFIG_BLK_DEV_SR
+          scripts/config --disable CONFIG_FLOPPY
+
+          echo "=== 裁剪：NLS 字符集 (约22个选项) ==="
+          scripts/config --disable CONFIG_NLS_CODEPAGE_437
+          scripts/config --disable CONFIG_NLS_ISO8859_1
+
+          # ============================================================
+          # 关闭所有 debug info（减小体积 + 加速链接）
+          # ============================================================
           scripts/config --disable CONFIG_DEBUG_INFO_BTF
           scripts/config --disable CONFIG_DEBUG_INFO_DWARF5
           scripts/config --disable CONFIG_DEBUG_INFO_DWARF4
           scripts/config --disable CONFIG_DEBUG_INFO
           scripts/config --enable  CONFIG_DEBUG_INFO_NONE
+          scripts/config --disable CONFIG_DEBUG_KERNEL
+          scripts/config --disable CONFIG_KPROBES
 
+          # ============================================================
+          # 确保关键功能保留
+          # ============================================================
+          scripts/config --enable CONFIG_VIRTIO
+          scripts/config --enable CONFIG_VIRTIO_PCI
+          scripts/config --module CONFIG_VIRTIO_NET
+          scripts/config --module CONFIG_VIRTIO_BLK
+          scripts/config --module CONFIG_VIRTIO_SCSI
+          scripts/config --module CONFIG_VIRTIO_BALLOON
+          scripts/config --enable CONFIG_VIRTIO_CONSOLE
+          scripts/config --enable CONFIG_EXT4_FS
+          scripts/config --module CONFIG_FUSE_FS
+          scripts/config --module CONFIG_OVERLAY_FS
+          scripts/config --module CONFIG_TUN
+          scripts/config --module CONFIG_VETH
+          scripts/config --module CONFIG_BRIDGE
+          scripts/config --module CONFIG_WIREGUARD
+          scripts/config --module CONFIG_NET_SCH_FQ
+          scripts/config --module CONFIG_NET_SCH_CAKE
+          scripts/config --enable CONFIG_TCP_CONG_BBR
+          scripts/config --enable CONFIG_INET
+          scripts/config --enable CONFIG_IPV6
+          scripts/config --enable CONFIG_NETFILTER
+          scripts/config --enable CONFIG_NF_CONNTRACK
+          scripts/config --module CONFIG_IP_NF_IPTABLES
+          scripts/config --module CONFIG_IP6_NF_IPTABLES
+          scripts/config --module CONFIG_NFT_NAT
+          scripts/config --module CONFIG_NFT_CT
+
+          # 级联处理所有依赖
           make olddefconfig LLVM=1
 
           echo ""
+          echo "=== 裁剪结果统计 ==="
+          echo "总选项数: $(grep -cE '^CONFIG.*=[ym]' .config)"
+          echo "模块数:   $(grep -c '=m' .config)"
+          echo "内建数:   $(grep -c '=y' .config)"
+          echo ""
           echo "=== 关键配置确认 ==="
-          grep -E "^CONFIG_HZ=|HZ_500|X86_64_VERSION|TCP_CONG_BBR|DEFAULT_TCP_CONG|DEFAULT_NET_SCH|DEBUG_INFO_NONE|NFT_FULLCONE|XT_TARGET_FLOWOFFLOAD|NF_FLOW_TABLE" .config
+          grep -E "^CONFIG_HZ=|HZ_500|X86_64_VERSION|TCP_CONG_BBR|DEFAULT_TCP_CONG|DEFAULT_NET_SCH|DEBUG_INFO_NONE|NFT_FULLCONE|XT_TARGET_FLOWOFFLOAD|NF_FLOW_TABLE|VIRTIO_NET|VIRTIO_SCSI|EXT4_FS|WIREGUARD" .config
 
       - name: Build kernel
         run: |
           cd kernel-src
           NPROC=$(nproc)
           echo "=== 开始编译 ($NPROC 核心) ==="
+          echo "=== 预计耗时: 60-90 分钟 (裁剪后) ==="
 
           # pipefail 确保 make 失败能被捕获
           set -o pipefail
@@ -207,7 +433,7 @@ jobs:
           tag_name: "${{ env.GIT_TAG }}-${{ env.TARGET_ARCH }}"
           name: "XanMod ${{ env.BASE_VER }} (${{ env.TARGET_ARCH }})"
           body: |
-            ## XanMod ${{ env.BASE_VER }} — 自定义编译
+            ## XanMod ${{ env.BASE_VER }} — 自定义编译 (极简服务器版)
 
             | 项目 | 值 |
             |------|---|
@@ -217,6 +443,8 @@ jobs:
             | 定时器 | 500Hz |
             | 默认拥塞控制 | BBR v3 |
             | 默认 qdisc | fq |
+            | 特性 | fullcone NAT, FLOWOFFLOAD, WireGuard |
+            | 裁剪 | 无声卡/蓝牙/WiFi/GPU/媒体/物理NIC |
 
             ### 安装
             ```bash
