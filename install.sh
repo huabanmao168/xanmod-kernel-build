@@ -71,7 +71,14 @@ section "3/3  sysctl 调优"
 # ═══════════════════════════════════════════════════════
 
 # conntrack 模块必须先加载，否则后面的 nf_conntrack_* 参数被内核忽略
-modprobe nf_conntrack 2>/dev/null || true
+modprobe nf_conntrack 2>/dev/null || modprobe nf_conntrack_ipv4 2>/dev/null || true
+sleep 1
+# 验证模块是否加载成功
+if lsmod | grep -q nf_conntrack; then
+  ok "nf_conntrack 模块已加载"
+else
+  warn "nf_conntrack 模块未能加载（重启新内核后自动生效）"
+fi
 echo "nf_conntrack" > /etc/modules-load.d/xanmod-conntrack.conf
 
 cat > /etc/sysctl.d/99-xanmod.conf << 'EOF'
@@ -237,7 +244,14 @@ check net.ipv4.tcp_notsent_lowat           131072
 check net.core.netdev_max_backlog          ""
 check net.core.netdev_budget               ""
 check net.ipv4.ip_local_reserved_ports     ""
-check net.netfilter.nf_conntrack_max       ""
+
+# conntrack 参数单独检查（模块未加载时不算失败）
+CT_MAX=$(sysctl -n net.netfilter.nf_conntrack_max 2>/dev/null)
+if [ -n "$CT_MAX" ]; then
+  printf "  ${GREEN}✅ %-45s %s${NC}\n" "net.netfilter.nf_conntrack_max" "$CT_MAX"
+else
+  printf "  ${YELLOW}⚠️  %-45s (模块未加载，重启后生效)${NC}\n" "net.netfilter.nf_conntrack_max"
+fi
 
 NIC2=$(ip route | awk '/^default/{print $5; exit}')
 if [ -n "$NIC2" ]; then
