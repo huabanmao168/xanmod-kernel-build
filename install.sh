@@ -194,10 +194,11 @@ if [ -n "$NIC" ] && command -v ethtool &>/dev/null; then
   ethtool -G "$NIC" rx 1024 tx 256 2>/dev/null && ok "NIC ring buffer rx=1024 tx=256 (virtio max)"
 fi
 
-# ── fq：小包优先 ──────────────────────────────────────
+# ── fq：低速率阈值 + quantum ──────────────────────────
 if [ -n "$NIC" ]; then
+  # mq 多队列网卡无法修改子队列参数，直接替换 root 为 fq
   tc qdisc replace dev "$NIC" root fq quantum 3028 low_rate_threshold 4Mbit 2>/dev/null \
-    && ok "fq low_rate_threshold = 4Mbit ($NIC)"
+    && ok "fq low_rate_threshold = 4Mbit, quantum = 3028 ($NIC)"
   grep -q "low_rate_threshold 4Mbit" /etc/rc.local 2>/dev/null \
     || echo "tc qdisc replace dev $NIC root fq quantum 3028 low_rate_threshold 4Mbit" >> /etc/rc.local
 fi
